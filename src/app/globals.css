@@ -1,0 +1,282 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ─── RAKIT fonts (self-hosted, variable) ──────────────────────────────────── */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url('/fonts/fraunces-300-900.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: italic;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url('/fonts/fraunces-300-900-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/space-grotesk-300-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-100-800.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: italic;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-100-800-italic.woff2') format('woff2');
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.5rem;
+  /* "Kertas" — warm paper light theme */
+  --background: #faf8f4;
+  --foreground: #211d19;
+  --card: #ffffff;
+  --card-foreground: #211d19;
+  --popover: #ffffff;
+  --popover-foreground: #211d19;
+  --primary: #211d19;
+  --primary-foreground: #faf8f4;
+  --secondary: #f0ede6;
+  --secondary-foreground: #211d19;
+  --muted: #f0ede6;
+  --muted-foreground: #7d756a;
+  --accent: #efe9df;
+  --accent-foreground: #211d19;
+  --destructive: #b3261e;
+  --border: #e6e1d7;
+  --input: #dcd6ca;
+  --ring: rgba(217, 72, 31, 0.45);
+  --brand: #d9481f;
+  --brand-foreground: #fff6f1;
+  --success: #2f7d4f;
+  --warning: #b98a1f;
+  --chart-1: #d9481f;
+  --chart-2: #b98a1f;
+  --chart-3: #2f7d4f;
+  --chart-4: #3e6b7e;
+  --chart-5: #7a4a6b;
+  --sidebar: #f4f0e8;
+  --sidebar-foreground: #211d19;
+  --sidebar-primary: #211d19;
+  --sidebar-primary-foreground: #faf8f4;
+  --sidebar-accent: #eae4d8;
+  --sidebar-accent-foreground: #211d19;
+  --sidebar-border: #e2dccc;
+  --sidebar-ring: rgba(217, 72, 31, 0.45);
+}
+
+.dark {
+  /* "Arang" — warm charcoal dark theme */
+  --background: #141210;
+  --foreground: #ede7dd;
+  --card: #1c1916;
+  --card-foreground: #ede7dd;
+  --popover: #201c18;
+  --popover-foreground: #ede7dd;
+  --primary: #ede7dd;
+  --primary-foreground: #141210;
+  --secondary: #211e1a;
+  --secondary-foreground: #ede7dd;
+  --muted: #211e1a;
+  --muted-foreground: #a39a8d;
+  --accent: #272219;
+  --accent-foreground: #ede7dd;
+  --destructive: #e5533d;
+  --border: #2b2723;
+  --input: #322d27;
+  --ring: rgba(255, 106, 61, 0.5);
+  --brand: #ff6a3d;
+  --brand-foreground: #1a0e08;
+  --success: #5fae7e;
+  --warning: #d1a13c;
+  --chart-1: #ff6a3d;
+  --chart-2: #d1a13c;
+  --chart-3: #5fae7e;
+  --chart-4: #6d9cb1;
+  --chart-5: #a97a9d;
+  --sidebar: #171412;
+  --sidebar-foreground: #ede7dd;
+  --sidebar-primary: #ede7dd;
+  --sidebar-primary-foreground: #141210;
+  --sidebar-accent: #221e1a;
+  --sidebar-accent-foreground: #ede7dd;
+  --sidebar-border: #262119;
+  --sidebar-ring: rgba(255, 106, 61, 0.5);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: 'ss01' on, 'cv01' on;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--brand) 22%, transparent);
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  /* thin, quiet scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+  }
+}
+
+@layer components {
+  /* mono section kicker — RAKIT signature */
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  /* strong editorial rule: thick charcoal bar + hairline */
+  .rule-strong {
+    border-top: 3px solid var(--foreground);
+    position: relative;
+  }
+  .rule-strong::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 0;
+    right: 0;
+    border-top: 1px solid var(--border);
+  }
+  /* editorial underline tab nav */
+  .tab-ed {
+    position: relative;
+    padding: 0.625rem 0.125rem;
+    margin-right: 1.25rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    transition: color 150ms ease;
+    white-space: nowrap;
+  }
+  .tab-ed:hover {
+    color: var(--foreground);
+  }
+  .tab-ed[data-active='true'] {
+    color: var(--foreground);
+    font-weight: 600;
+  }
+  .tab-ed[data-active='true']::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: var(--brand);
+  }
+  /* kanban drop indicator */
+  .drop-above {
+    box-shadow: 0 -2px 0 0 var(--brand);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* markdown-ish document preview */
+.doc-preview h1 { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; margin: 1.25rem 0 0.75rem; }
+.doc-preview h2 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 600; margin: 1.1rem 0 0.6rem; }
+.doc-preview h3 { font-weight: 600; font-size: 1.05rem; margin: 1rem 0 0.5rem; }
+.doc-preview p { margin: 0.55rem 0; line-height: 1.7; }
+.doc-preview ul, .doc-preview ol { margin: 0.55rem 0 0.55rem 1.25rem; line-height: 1.7; }
+.doc-preview ul { list-style: disc; }
+.doc-preview ol { list-style: decimal; }
+.doc-preview code { font-family: var(--font-mono); font-size: 0.85em; background: var(--muted); padding: 0.1em 0.35em; border-radius: 4px; }
+.doc-preview pre { background: var(--muted); padding: 0.85rem 1rem; border-radius: 8px; overflow-x: auto; margin: 0.75rem 0; }
+.doc-preview blockquote { border-left: 3px solid var(--brand); padding-left: 0.9rem; color: var(--muted-foreground); margin: 0.75rem 0; }
+.doc-preview a { color: var(--brand); text-decoration: underline; }
+.doc-preview hr { border-color: var(--border); margin: 1.1rem 0; }
