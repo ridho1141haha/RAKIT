@@ -54,7 +54,7 @@ export const GET = route(async (req: NextRequest, ctx: Ctx) => {
 
 const createSchema = z.object({
   title: z.string().trim().min(2, 'Judul ide minimal 2 karakter.').max(120),
-  description: z.string().trim().max(2000).optional().or(z.literal('')),
+  description: z.string().trim().max(2000).nullable().optional(),
   category: z.string().trim().min(1).max(40).default('Umum'),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'),
   tags: z.array(z.string().trim().min(1).max(30)).max(6, 'Maksimal 6 tag.').optional(),

@@ -58,7 +58,7 @@ export const GET = route(async (_req: NextRequest, ctx: Ctx) => {
 
 const createSchema = z.object({
   title: z.string().trim().min(2, 'Judul tugas minimal 2 karakter.').max(140),
-  description: z.string().trim().max(2000).optional().or(z.literal('')),
+  description: z.string().trim().max(2000).nullable().optional(),
   status: z.enum(['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE']).default('BACKLOG'),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'),
   assigneeId: z.string().nullable().optional(),

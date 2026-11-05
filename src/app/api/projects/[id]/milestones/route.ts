@@ -36,7 +36,7 @@ export const GET = route(async (_req: NextRequest, ctx: Ctx) => {
 
 const schema = z.object({
   name: z.string().trim().min(2, 'Nama milestone minimal 2 karakter.').max(100),
-  description: z.string().trim().max(500).optional().or(z.literal('')),
+  description: z.string().trim().max(500).nullable().optional(),
   targetDate: z.string().datetime().nullable().optional(),
 })
 

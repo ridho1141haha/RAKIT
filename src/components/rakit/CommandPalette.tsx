@@ -3,17 +3,23 @@
 /**
  * CommandPalette — global search (projects/tasks/ideas/documents/milestones)
  * + navigation & creation commands. Opened with `/` or ⌘K via the store overlay.
+ *
+ * NOTE: uses shouldFilter={false} + manual filtering — cmdk's built-in filter
+ * misbehaves under React 19.2 (items unmount on any non-empty query).
  */
 
 import * as React from 'react'
 import { useRakit } from '@/components/rakit/store'
 import { apiGet } from '@/components/rakit/api-client'
 import type { SearchResult } from '@/components/rakit/types'
-import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
 import {
   LayoutDashboard, CheckSquare, Lightbulb, FolderKanban, FileText, Users,
   Activity, Bell, Settings, Plus, Search, Flag, Building2, UserPlus, CornerDownLeft,
 } from 'lucide-react'
+
+type Cmd = { id: string; icon: React.ComponentType<{ className?: string }>; label: string; hint?: string; run: () => void }
 
 export function CommandPalette() {
   const overlay = useRakit((s) => s.overlay)
@@ -33,10 +39,11 @@ export function CommandPalette() {
     if (!open) {
       setQuery('')
       setResults(null)
+      setSearching(false)
     }
   }, [open])
 
-  // debounced search
+  // debounced server search
   React.useEffect(() => {
     if (!open || !workspaceId) return
     const q = query.trim()
@@ -71,61 +78,73 @@ export function CommandPalette() {
     closeOverlay()
   }
 
-  const nav = [
-    { icon: LayoutDashboard, label: 'Ikhtisar', run: () => navigate({ name: 'dashboard' }) },
-    { icon: CheckSquare, label: 'Tugas Saya', run: () => navigate({ name: 'my-tasks' }) },
-    { icon: Lightbulb, label: 'Inbox Ide', run: () => navigate({ name: 'inbox' }) },
-    { icon: FolderKanban, label: 'Proyek', run: () => navigate({ name: 'projects' }) },
-    { icon: FileText, label: 'Dokumen', run: () => navigate({ name: 'documents' }) },
-    { icon: Users, label: 'Anggota', run: () => navigate({ name: 'members' }) },
-    { icon: Activity, label: 'Aktivitas', run: () => navigate({ name: 'activity' }) },
-    { icon: Bell, label: 'Notifikasi', run: () => navigate({ name: 'notifications' }) },
-    { icon: Settings, label: 'Pengaturan', run: () => navigate({ name: 'settings' }) },
+  const navCmds: Cmd[] = [
+    { id: 'n-dash', icon: LayoutDashboard, label: 'Ikhtisar', run: () => navigate({ name: 'dashboard' }) },
+    { id: 'n-tasks', icon: CheckSquare, label: 'Tugas Saya', run: () => navigate({ name: 'my-tasks' }) },
+    { id: 'n-inbox', icon: Lightbulb, label: 'Inbox Ide', run: () => navigate({ name: 'inbox' }) },
+    { id: 'n-projects', icon: FolderKanban, label: 'Proyek', run: () => navigate({ name: 'projects' }) },
+    { id: 'n-docs', icon: FileText, label: 'Dokumen', run: () => navigate({ name: 'documents' }) },
+    { id: 'n-members', icon: Users, label: 'Anggota', run: () => navigate({ name: 'members' }) },
+    { id: 'n-activity', icon: Activity, label: 'Aktivitas', run: () => navigate({ name: 'activity' }) },
+    { id: 'n-notif', icon: Bell, label: 'Notifikasi', run: () => navigate({ name: 'notifications' }) },
+    { id: 'n-settings', icon: Settings, label: 'Pengaturan', run: () => navigate({ name: 'settings' }) },
   ]
 
-  const actions = [
-    { icon: Plus, label: 'Tugas baru', hint: 'C', run: () => openOverlay({ kind: 'task-create' }) },
-    { icon: Lightbulb, label: 'Ide baru', hint: 'N', run: () => openOverlay({ kind: 'idea-create' }) },
-    { icon: FolderKanban, label: 'Proyek baru', run: () => openOverlay({ kind: 'project-create' }) },
-    { icon: Building2, label: 'Workspace baru', run: () => openOverlay({ kind: 'workspace-create' }) },
-    { icon: UserPlus, label: 'Undang anggota', run: () => openOverlay({ kind: 'invite-member' }) },
+  const actionCmds: Cmd[] = [
+    { id: 'a-task', icon: Plus, label: 'Tugas baru', hint: 'C', run: () => openOverlay({ kind: 'task-create' }) },
+    { id: 'a-idea', icon: Lightbulb, label: 'Ide baru', hint: 'N', run: () => openOverlay({ kind: 'idea-create' }) },
+    { id: 'a-project', icon: FolderKanban, label: 'Proyek baru', run: () => openOverlay({ kind: 'project-create' }) },
+    { id: 'a-workspace', icon: Building2, label: 'Workspace baru', run: () => openOverlay({ kind: 'workspace-create' }) },
+    { id: 'a-invite', icon: UserPlus, label: 'Undang anggota', run: () => openOverlay({ kind: 'invite-member' }) },
   ]
+
+  const q = query.trim().toLowerCase()
+  const filter = (items: Cmd[]) => (q ? items.filter((i) => i.label.toLowerCase().includes(q)) : items)
+  const nav = filter(navCmds)
+  const actions = filter(actionCmds)
 
   const hasResults =
-    results &&
-    (results.projects.length || results.tasks.length || results.ideas.length || results.documents.length || results.milestones.length)
+    results && (results.projects.length || results.tasks.length || results.ideas.length || results.documents.length || results.milestones.length)
+  const nothingFound = q.length >= 2 && !searching && !hasResults && nav.length === 0 && actions.length === 0
 
   return (
-    <CommandDialog open={open} onOpenChange={(o) => !o && closeOverlay()}>
-      <CommandInput value={query} onValueChange={setQuery} placeholder="Cari proyek, tugas, ide, dokumen…" />
-      <CommandList className="min-h-72">
-        {searching && !hasResults ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">Mencari…</div>
-        ) : null}
+    <Dialog open={open} onOpenChange={(o) => !o && closeOverlay()}>
+      <DialogContent className="overflow-hidden p-0 sm:max-w-xl" showCloseButton={false}>
+        <DialogTitle className="sr-only">Pencarian global</DialogTitle>
+        <Command shouldFilter={false} className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5">
+          <CommandInput value={query} onValueChange={setQuery} placeholder="Cari proyek, tugas, ide, dokumen…" />
+          <CommandList className="min-h-72">
+            {searching && !hasResults ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Mencari…</div>
+            ) : null}
 
-        {!query && (
-          <>
-            <CommandGroup heading="Navigasi">
-              {nav.map((n) => (
-                <CommandItem key={n.label} onSelect={go(n.run)}>
-                  <n.icon className="mr-2 size-4 text-muted-foreground" />
-                  {n.label}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading="Aksi cepat">
-              {actions.map((a) => (
-                <CommandItem key={a.label} onSelect={go(a.run)}>
-                  <a.icon className="mr-2 size-4 text-muted-foreground" />
-                  <span>{a.label}</span>
-                  {a.hint ? (
-                    <kbd className="ml-auto rounded border border-border bg-muted px-1.5 font-mono text-[10px]">{a.hint}</kbd>
-                  ) : null}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-            {workspaces.length > 1 ? (
+            {nav.length ? (
+              <CommandGroup heading="Navigasi">
+                {nav.map((n) => (
+                  <CommandItem key={n.id} onSelect={go(n.run)}>
+                    <n.icon className="mr-2 size-4 text-muted-foreground" />
+                    {n.label}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+
+            {actions.length ? (
+              <>
+                {nav.length ? <CommandSeparator /> : null}
+                <CommandGroup heading="Aksi cepat">
+                  {actions.map((a) => (
+                    <CommandItem key={a.id} onSelect={go(a.run)}>
+                      <a.icon className="mr-2 size-4 text-muted-foreground" />
+                      <span>{a.label}</span>
+                      {a.hint ? <kbd className="ml-auto rounded border border-border bg-muted px-1.5 font-mono text-[10px]">{a.hint}</kbd> : null}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            ) : null}
+
+            {workspaces.length > 1 && (q ? 'workspace'.includes(q) || 'pindah'.includes(q) : true) ? (
               <>
                 <CommandSeparator />
                 <CommandGroup heading="Pindah workspace">
@@ -139,83 +158,84 @@ export function CommandPalette() {
                 </CommandGroup>
               </>
             ) : null}
-          </>
-        )}
 
-        {query && !searching && !hasResults ? (
-          <CommandEmpty>Tidak ada hasil untuk “{query}”.</CommandEmpty>
-        ) : null}
+            {results?.projects.length ? (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading="Proyek">
+                  {results.projects.map((p) => (
+                    <CommandItem key={p.id} onSelect={go(() => navigate({ name: 'project', projectId: p.id, tab: 'board' }))}>
+                      <span className="mr-2 size-2 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
+                      {p.name}
+                      <CornerDownLeft className="ml-auto size-3 text-muted-foreground" />
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            ) : null}
 
-        {results?.projects.length ? (
-          <CommandGroup heading="Proyek">
-            {results.projects.map((p) => (
-              <CommandItem key={p.id} onSelect={go(() => navigate({ name: 'project', projectId: p.id, tab: 'board' }))}>
-                <span className="mr-2 size-2 rounded-full" style={{ backgroundColor: p.color }} />
-                {p.name}
-                <CornerDownLeft className="ml-auto size-3 text-muted-foreground" />
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
+            {results?.tasks.length ? (
+              <CommandGroup heading="Tugas">
+                {results.tasks.map((t) => (
+                  <CommandItem
+                    key={t.id}
+                    onSelect={go(() => {
+                      navigate({ name: 'project', projectId: t.projectId, tab: 'board' })
+                      setTimeout(() => openOverlay({ kind: 'task-edit', taskId: t.id }), 80)
+                    })}
+                  >
+                    <CheckSquare className="mr-2 size-4 text-muted-foreground" />
+                    <span className="truncate">{t.title}</span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">{t.projectName}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
 
-        {results?.tasks.length ? (
-          <CommandGroup heading="Tugas">
-            {results.tasks.map((t) => (
-              <CommandItem
-                key={t.id}
-                onSelect={go(() => {
-                  navigate({ name: 'project', projectId: t.projectId, tab: 'board' })
-                  setTimeout(() => openOverlay({ kind: 'task-edit', taskId: t.id }), 80)
-                })}
-              >
-                <CheckSquare className="mr-2 size-4 text-muted-foreground" />
-                <span className="truncate">{t.title}</span>
-                <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">{t.projectName}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
+            {results?.ideas.length ? (
+              <CommandGroup heading="Ide">
+                {results.ideas.map((i) => (
+                  <CommandItem key={i.id} onSelect={go(() => navigate({ name: 'inbox', ideaId: i.id }))}>
+                    <Lightbulb className="mr-2 size-4 text-muted-foreground" />
+                    {i.title}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
 
-        {results?.ideas.length ? (
-          <CommandGroup heading="Ide">
-            {results.ideas.map((i) => (
-              <CommandItem key={i.id} onSelect={go(() => navigate({ name: 'inbox', ideaId: i.id }))}>
-                <Lightbulb className="mr-2 size-4 text-muted-foreground" />
-                {i.title}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
+            {results?.documents.length ? (
+              <CommandGroup heading="Dokumen">
+                {results.documents.map((d) => (
+                  <CommandItem key={d.id} onSelect={go(() => navigate({ name: 'documents', documentId: d.id }))}>
+                    <FileText className="mr-2 size-4 text-muted-foreground" />
+                    {d.title}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
 
-        {results?.documents.length ? (
-          <CommandGroup heading="Dokumen">
-            {results.documents.map((d) => (
-              <CommandItem key={d.id} onSelect={go(() => navigate({ name: 'documents', documentId: d.id }))}>
-                <FileText className="mr-2 size-4 text-muted-foreground" />
-                {d.title}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
+            {results?.milestones.length ? (
+              <CommandGroup heading="Milestone">
+                {results.milestones.map((m) => (
+                  <CommandItem key={m.id} onSelect={go(() => navigate({ name: 'project', projectId: m.projectId, tab: 'milestones' }))}>
+                    <Flag className="mr-2 size-4 text-muted-foreground" />
+                    <span className="truncate">{m.name}</span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">{m.projectName}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
 
-        {results?.milestones.length ? (
-          <CommandGroup heading="Milestone">
-            {results.milestones.map((m) => (
-              <CommandItem key={m.id} onSelect={go(() => navigate({ name: 'project', projectId: m.projectId, tab: 'milestones' }))}>
-                <Flag className="mr-2 size-4 text-muted-foreground" />
-                <span className="truncate">{m.name}</span>
-                <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">{m.projectName}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
-      </CommandList>
-      <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-[10px] text-muted-foreground">
-        <span className="flex items-center gap-1"><kbd className="rounded border border-border bg-muted px-1 font-mono">↑↓</kbd> navigasi</span>
-        <span className="flex items-center gap-1"><kbd className="rounded border border-border bg-muted px-1 font-mono">↵</kbd> buka</span>
-        <span className="flex items-center gap-1"><kbd className="rounded border border-border bg-muted px-1 font-mono">esc</kbd> tutup</span>
-        <span className="ml-auto flex items-center gap-1"><Search className="size-3" /> RAKIT pencarian global</span>
-      </div>
-    </CommandDialog>
+            {nothingFound ? <CommandEmpty>Tidak ada hasil untuk “{query.trim()}”.</CommandEmpty> : null}
+          </CommandList>
+          <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1"><kbd className="rounded border border-border bg-muted px-1 font-mono">↑↓</kbd> navigasi</span>
+            <span className="flex items-center gap-1"><kbd className="rounded border border-border bg-muted px-1 font-mono">↵</kbd> buka</span>
+            <span className="flex items-center gap-1"><kbd className="rounded border border-border bg-muted px-1 font-mono">esc</kbd> tutup</span>
+            <span className="ml-auto flex items-center gap-1"><Search className="size-3" /> RAKIT pencarian global</span>
+          </div>
+        </Command>
+      </DialogContent>
+    </Dialog>
   )
 }

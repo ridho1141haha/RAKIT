@@ -10,7 +10,7 @@ type Ctx = { params: Promise<{ id: string }> }
 
 const createSchema = z.object({
   name: z.string().trim().min(2, 'Nama proyek minimal 2 karakter.').max(80),
-  description: z.string().trim().max(500).optional().or(z.literal('')),
+  description: z.string().trim().max(500).nullable().optional(),
   status: z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED']).default('PLANNING'),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default('#D9481F'),
