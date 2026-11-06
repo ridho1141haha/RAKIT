@@ -12,6 +12,10 @@ node_modules
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
 
 # next.js
 /.next/
@@ -57,6 +61,14 @@ server.log
 # runtime database (recreate with `bun run db:push` + `bunx tsx prisma/seed.ts`)
 db/*.db
 db/*.db-journal
+db/*.db-wal
+db/*.db-shm
+# defensive: relative DATABASE_URL paths can also resolve inside prisma/
+prisma/db/
+prisma/*.db
+prisma/*.db-journal
+*.sqlite
+*.sqlite3
 
 # sandbox / runtime artifacts (not part of the RAKIT app)
 .zscripts/
