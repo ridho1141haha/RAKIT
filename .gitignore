@@ -67,3 +67,5 @@ download/
 /mini-services/
 Caddyfile
 .env
+test-results/
+playwright-report/

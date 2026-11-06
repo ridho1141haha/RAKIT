@@ -3,14 +3,16 @@
 /**
  * BoardView — Kanban with 5 status columns and native HTML5 drag & drop.
  * Drop position is computed from pointer Y against card midpoints; the move is
- * applied optimistically, then persisted with PATCH /api/tasks/:id { status, position }.
- * Keyboard fallback: per-card "Pindah ke →" menu (same PATCH contract).
+ * applied optimistically, then persisted with POST /api/projects/:id/tasks/reorder
+ * carrying the COMPLETE ordering of every affected column (so sibling positions
+ * are rewritten, not just the dragged card). Keyboard fallback: per-card
+ * "Pindah ke →" menu (same contract). On failure: toast + refetch revert.
  */
 
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { useRakit } from '@/components/rakit/store'
-import { apiPatch } from '@/components/rakit/api-client'
+import { apiPost } from '@/components/rakit/api-client'
 import type { Task, TaskStatus } from '@/components/rakit/types'
 import { TASK_STATUSES, TASK_STATUS_LABEL } from '@/lib/constants'
 import { formatHours } from '@/components/rakit/format'
@@ -26,12 +28,14 @@ import { ArrowRightLeft, MessageSquare, Plus } from 'lucide-react'
 import { errMessage } from './shared'
 
 export function BoardView({
+  projectId,
   tasks,
   setTasks,
   canEdit,
   onOpenTask,
   onCreate,
 }: {
+  projectId: string
   tasks: Task[]
   setTasks: (updater: (prev: Task[]) => Task[]) => void
   canEdit: boolean
@@ -51,6 +55,25 @@ export function BoardView({
     setDrop(null)
   }
 
+  // ── drag robustness ──
+  // A drag that never receives `dragend`/`drop` (interrupted by an unexpected
+  // navigation or an event swallowed mid-flight) would leave the dragged card
+  // hidden forever. Listen for both events in the BUBBLE phase (window-level
+  // handlers run AFTER the board's own handlers — capture would clear the drag
+  // state before handleDrop reads it) and arm a failsafe timer as a last resort.
+  React.useEffect(() => {
+    if (draggingId === null) return
+    const onEnd = () => clearDrag()
+    window.addEventListener('dragend', onEnd)
+    window.addEventListener('drop', onEnd)
+    const failsafe = setTimeout(onEnd, 60_000)
+    return () => {
+      window.removeEventListener('dragend', onEnd)
+      window.removeEventListener('drop', onEnd)
+      clearTimeout(failsafe)
+    }
+  }, [draggingId])
+
   /** Reassign status + sequential positions locally (optimistic reorder). */
   function applyMove(all: Task[], dragId: string, status: TaskStatus, index: number): Task[] {
     const moved = all.find((t) => t.id === dragId)
@@ -65,14 +88,30 @@ export function BoardView({
     })
   }
 
-  /** Optimistic move + PATCH { status, position }; failure → toast + refetch revert. */
+  /** Optimistic move + full-column reorder POST; failure → toast + refetch revert. */
   function moveTask(dragId: string, status: TaskStatus, index: number) {
     const task = tasks.find((t) => t.id === dragId)
     if (!task) return
     const curIndex = tasks.filter((t) => t.status === task.status).findIndex((t) => t.id === dragId)
     if (task.status === status && index === curIndex) return // no-op
-    setTasks((prev) => applyMove(prev, dragId, status, index))
-    apiPatch(`/api/tasks/${dragId}`, { status, position: index })
+
+    // Compute the optimistic state first, then derive the complete ordering of
+    // every affected column from it — the server rewrites all of them in one tx.
+    const nextTasks = applyMove(tasks, dragId, status, index)
+    setTasks(() => nextTasks)
+
+    const affected = task.status === status ? [status] : [task.status, status]
+    const columns = affected.map((s) => ({
+      status: s,
+      // .map() alone preserves the ORIGINAL array order — sort by the NEW
+      // optimistic positions, otherwise we'd persist the stale ordering.
+      taskIds: nextTasks
+        .filter((t) => t.status === s)
+        .sort((x, y) => x.position - y.position)
+        .map((t) => t.id),
+    }))
+
+    apiPost(`/api/projects/${projectId}/tasks/reorder`, { movedTaskId: dragId, columns })
       .then(() => bump())
       .catch((e: unknown) => {
         toast({ title: 'Gagal memindahkan tugas', description: errMessage(e), variant: 'destructive' })

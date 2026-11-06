@@ -49,7 +49,9 @@ timezone **Asia/Jakarta**.
 - **Activity + notifications** are written in the same transaction as the mutation that caused
   them; notifications deduplicate via `@@unique([userId, dedupeKey])`.
 - **Kanban persistence**: dropping a card optimistically reorders client state, then
-  `PATCH /api/tasks/:id { status, position }` persists it; failures revert via refetch.
+  `POST /api/projects/:id/tasks/reorder` persists the **complete ordering of every affected
+  column** in one transaction (compact positions, cross-project id rejection, `completedAt`
+  maintenance); failures revert via refetch.
 - **Consistent progress**: `done/total` always from `Task.groupBy`, never manual percentages.
 - **Cursor pagination** for activity feeds; `groupBy` to avoid N+1 on task stats.
 - SQLite keeps local development dependency-free; the schema is normalized (see
@@ -84,7 +86,9 @@ collaboration/permission flows from another browser profile)
 | --- | --- |
 | `bun run dev` | Dev server (port 3000, logs to `dev.log`) |
 | `bun run lint` | ESLint |
-| `bun run db:push` | Push `prisma/schema.prisma` to the database |
+| `bun run typecheck` | `tsc --noEmit` (also enforced by `next build`) |
+| `bunx playwright test` | E2E suite (18 tests) against a running dev server |
+| `bun run db:push` | Push `prisma/schema.prisma` to the database (dev only) |
 | `bun run db:generate` | Generate Prisma client |
 | `bun prisma/seed.ts` | Reset + reseed demo data |
 
@@ -108,29 +112,39 @@ src/lib/                    # domain core: auth, permissions, activity, api-help
 src/app/api/                # REST routes (auth, workspaces, projects, tasks, ideas, …)
 src/components/rakit/       # the app: store, shell, views, project workspace, primitives
 src/components/rakit/CONVENTIONS.md   # engineering conventions (single source of truth)
+e2e/                        # Playwright E2E suite (+ helpers); config: playwright.config.ts
+DEPLOYMENT.md               # SQLite persistence, backups, migration strategy, Postgres plan
 PRODUCT.md                  # product brief
 DESIGN.md                   # visual system & design tokens
 ```
 
-## QA summary (what was verified in a real browser)
+## QA summary (automated E2E suite — 18 Playwright tests, all passing)
 
-- Register → onboarding → empty states render with real data; demo login works
-- Kanban drag-and-drop **persists after reload** (verified in DB: `status`, `position`)
-- Task create via `C` shortcut; checklist + comments persist; activity + notifications generated
-- Idea quick-capture → convert to project (navigates to the new board, idea marked CONVERTED)
-- Documents autosave writes to DB (status shows "Tersimpan HH.mm"); failure state never clears text
-- List + Timeline + Milestones reflect the same underlying task data as the board
-- Global search (`/`) returns grouped results across all five entity types
-- Notifications: unread badges, mark-all-read clears everywhere
-- Cross-workspace isolation: user B gets 404-style errors on user A's project/dashboard APIs
-- Unauthenticated API access → 401; wrong password → generic error; rate limiting on auth routes
-- Responsive: 390 px (mobile drawer nav, scrollable board) → 1440 px; light & dark themes
-- `eslint` clean · `tsc --noEmit` clean (project code)
+Run with a dev server on port 3000: `bunx playwright test` (config in
+`playwright.config.ts`, specs in `e2e/`). The suite covers:
+
+1. Registration → onboarding → logout → login; failed login shows a generic error
+2. Workspace creation via the switcher; project creation; opening the board
+3. Task creation on the Kanban board
+4. **Same-column and cross-column drag-and-drop that persists across reload**
+   (real HTML5 drag event simulation + keyboard-accessible move menu)
+5. **Cross-workspace isolation at the API level**: foreign label ids → 400 with
+   no partial write; foreign task ids → 404/400 on read and reorder
+6. Document autosave: persists after reload; **switching documents mid-save never
+   bleeds content between docs**; failed save keeps text and retries; refresh
+   immediately after typing (keepalive flush); rapid edits across 3 documents
+7. Notifications: task assignment notifies the assignee; mark-all-read clears badges
+8. Mobile (Pixel 7 viewport): hamburger sheet navigation, sticky footer
+
+`.env` never enters git; production type safety is enforced (`ignoreBuildErrors: false`,
+`tsc --noEmit` clean; ESLint clean).
 
 ## Known limitations (documented, not hidden)
 
-- **No automated test suite** — QA was performed as scripted end-to-end browser verification
-  (see above) rather than a Playwright suite; the sandbox disallows extra test infrastructure.
+- **SQLite = single instance** (one writer); horizontal scaling requires the PostgreSQL
+  plan in [`DEPLOYMENT.md`](./DEPLOYMENT.md) — which also documents the migration
+  strategy, backup procedure, and what silently replaces the database (`db:push`, seed,
+  unmounted volumes).
 - **Invitations are in-app only** (no email delivery) — the invitee sees and accepts them from
   the workspace switcher / notifications after logging in with the invited email.
 - **SPA navigation is state-based** (single route constraint); browser back/forward and
@@ -140,13 +154,13 @@ DESIGN.md                   # visual system & design tokens
 - **Rate limiting** is in-memory (per-instance), fine for local/small deployments.
 - Timeline uses task `startDate→dueDate` (or `createdAt→+2d` when absent) as the bar range.
 - Completed tasks still show their (historical) due-date label; overdue styling is muted for them.
+- Document autosave is last-write-wins across simultaneous editors (no OTM/CRDT merging).
 
 ## Suggested next milestones
 
-1. Playwright E2E suite covering the ten acceptance flows
-2. URL-backed navigation (deep links + browser history)
-3. PostgreSQL + migrations for team deployments; Docker Compose
-4. Realtime collaboration (WebSocket presence + live task updates)
-5. i18n extraction (`id-ID` → `en`) — strings already centralized
-6. File attachments for tasks/documents (object storage adapter)
-7. Per-project timeline with dependencies (gantt links)
+1. URL-backed navigation (deep links + browser history)
+2. PostgreSQL + migrations for team deployments; Docker Compose (plan in `DEPLOYMENT.md`)
+3. Realtime collaboration (WebSocket presence + live task updates)
+4. i18n extraction (`id-ID` → `en`) — strings already centralized
+5. File attachments for tasks/documents (object storage adapter)
+6. Per-project timeline with dependencies (gantt links)

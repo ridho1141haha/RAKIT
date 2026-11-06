@@ -2,11 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* config options here */
+  // Type errors MUST fail the production build — no silent shipping of broken types.
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
-  reactStrictMode: false,
+  reactStrictMode: true,
 };
 
 export default nextConfig;

@@ -64,15 +64,19 @@ export const PATCH = route(async (req: NextRequest, ctx: Ctx) => {
     },
   })
 
-  await logActivity(db, {
-    workspaceId: existing.workspaceId,
-    projectId: document.projectId,
-    userId: user.id,
-    type: 'DOCUMENT_UPDATED',
-    entityType: 'document',
-    entityId: document.id,
-    entityTitle: document.title,
-  })
+  // Activity: autosave fires every few seconds, so only log MEANINGFUL updates
+  // (title changes). Content-only edits would flood the workspace activity feed.
+  if (body.title !== undefined && body.title !== existing.title) {
+    await logActivity(db, {
+      workspaceId: existing.workspaceId,
+      projectId: document.projectId,
+      userId: user.id,
+      type: 'DOCUMENT_UPDATED',
+      entityType: 'document',
+      entityId: document.id,
+      entityTitle: document.title,
+    })
+  }
 
   return NextResponse.json({ document })
 })

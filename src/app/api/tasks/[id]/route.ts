@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { ApiError, parseBody, route } from '@/lib/api-helpers'
 import { requireUser } from '@/lib/auth'
-import { requireTask } from '@/lib/permissions'
+import { requireTask, resolveLabelIds } from '@/lib/permissions'
 import { logActivity, notify } from '@/lib/activity'
 import { TASK_STATUS_LABEL, type TaskStatus } from '@/lib/constants'
 
@@ -78,14 +78,31 @@ export const PATCH = route(async (req: NextRequest, ctx: Ctx) => {
     const ms = await db.milestone.findUnique({ where: { id: body.milestoneId } })
     if (!ms || ms.projectId !== existing.projectId) throw new ApiError(400, 'Milestone tidak valid.')
   }
+  // SECURITY: every label must belong to the task's workspace (rejects cross-workspace ids)
+  const validLabelIds = body.labelIds
+    ? await resolveLabelIds(body.labelIds, existing.project.workspaceId)
+    : null
 
   const result = await db.$transaction(async (tx) => {
-    // ── labels sync ──
-    if (body.labelIds) {
+    // ── labels sync (validated ids only, inside the tx: no partial label writes) ──
+    if (validLabelIds) {
       await tx.taskLabel.deleteMany({ where: { taskId: id } })
-      if (body.labelIds.length) {
-        await tx.taskLabel.createMany({ data: body.labelIds.map((labelId) => ({ taskId: id, labelId })) })
+      if (validLabelIds.length) {
+        await tx.taskLabel.createMany({ data: validLabelIds.map((labelId) => ({ taskId: id, labelId })) })
       }
+    }
+
+    // ── position normalization ──
+    // Status-only moves (dialog, dashboard toggle, my-tasks) would otherwise land
+    // in the target column with a stale/duplicate position. Append to the end.
+    let positionData = body.position
+    if (body.status && body.status !== existing.status && positionData === undefined) {
+      const last = await tx.task.findFirst({
+        where: { projectId: existing.projectId, status: body.status },
+        orderBy: { position: 'desc' },
+        select: { position: true },
+      })
+      positionData = (last?.position ?? -1) + 1
     }
 
     const updated = await tx.task.update({
@@ -100,7 +117,7 @@ export const PATCH = route(async (req: NextRequest, ctx: Ctx) => {
         ...(body.startDate !== undefined ? { startDate: body.startDate ? new Date(body.startDate) : null } : {}),
         ...(body.dueDate !== undefined ? { dueDate: body.dueDate ? new Date(body.dueDate) : null } : {}),
         ...(body.estimate !== undefined ? { estimate: body.estimate } : {}),
-        ...(body.position !== undefined ? { position: body.position } : {}),
+        ...(positionData !== undefined ? { position: positionData } : {}),
         completedAt: nowDone ? (wasDone ? existing.completedAt : new Date()) : null,
       },
       include: {

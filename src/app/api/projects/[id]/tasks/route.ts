@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { ApiError, parseBody, route } from '@/lib/api-helpers'
 import { requireUser } from '@/lib/auth'
-import { requireProject } from '@/lib/permissions'
+import { requireProject, resolveLabelIds } from '@/lib/permissions'
 import { logActivity, notify } from '@/lib/activity'
 import type { TaskStatus } from '@/lib/constants'
 
@@ -93,6 +93,8 @@ export const POST = route(async (req: NextRequest, ctx: Ctx) => {
     const ms = await db.milestone.findUnique({ where: { id: body.milestoneId } })
     if (!ms || ms.projectId !== id) throw new ApiError(400, 'Milestone tidak valid.')
   }
+  // SECURITY: every label must belong to this workspace (rejects cross-workspace ids)
+  const validLabelIds = body.labelIds ? await resolveLabelIds(body.labelIds, project.workspaceId) : null
 
   const created = await db.task.create({
     data: {
@@ -109,8 +111,8 @@ export const POST = route(async (req: NextRequest, ctx: Ctx) => {
       position: (last?.position ?? -1) + 1,
       createdById: user.id,
       completedAt: body.status === 'DONE' ? new Date() : null,
-      ...(body.labelIds?.length
-        ? { labels: { create: body.labelIds.map((labelId) => ({ labelId })) } }
+      ...(validLabelIds?.length
+        ? { labels: { create: validLabelIds.map((labelId) => ({ labelId })) } }
         : {}),
     },
     include: taskInclude,

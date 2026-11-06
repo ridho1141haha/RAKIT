@@ -104,9 +104,10 @@ Toasts: `import { toast } from '@/hooks/use-toast'` → `toast({ title, descript
 - `PATCH /api/projects/:id` `{ name?, description?, status?, priority?, startDate?, targetDate? }`
 - `DELETE /api/projects/:id`
 - `GET /api/projects/:id/tasks` → `{ tasks: Task[] }` (Task has `labels[]`, `_count {comments, checklist, checklistDone}`, `assignee`)
-- `POST /api/projects/:id/tasks` `{ title, description?, status?, priority?, assigneeId?, milestoneId?, startDate?, dueDate?, estimate?, labelIds? }`
+- `POST /api/projects/:id/tasks` `{ title, description?, status?, priority?, assigneeId?, milestoneId?, startDate?, dueDate?, estimate?, labelIds? }` — `labelIds` validated server-side against the task's workspace (cross-workspace ids → 400)
+- `POST /api/projects/:id/tasks/reorder` — kanban drag persistence: `{ movedTaskId?, columns: [{ status, taskIds }] }` with the COMPLETE ordered id list of every affected column; server validates ids ∈ project and rewrites all affected columns in one transaction (compact 0..n-1 positions, appends missing DB tasks, maintains completedAt)
 - `GET /api/tasks/:id` → `{ task }` incl. `checklist[]` + `comments[]` + `milestone`
-- `PATCH /api/tasks/:id` — any task field; **kanban move = `{ status, position }`** (position = index in target column); also `labelIds`
+- `PATCH /api/tasks/:id` — any task field; also `labelIds` (workspace-validated). Status-only changes without an explicit position are appended to the end of the target column
 - `DELETE /api/tasks/:id`
 - `GET/POST /api/tasks/:id/comments` `{ content }`
 - `POST /api/tasks/:id/checklist` `{ content }`; `PATCH/DELETE /api/checklist/:id` `{ done?, content? }`

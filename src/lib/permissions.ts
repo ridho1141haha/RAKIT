@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { forbidden, notFound } from '@/lib/api-helpers'
+import { ApiError, forbidden, notFound } from '@/lib/api-helpers'
 import { ROLE_LEVEL, type Role } from '@/lib/constants'
 import type { SessionUser } from '@/lib/auth'
 
@@ -63,4 +63,22 @@ export async function requireTask(taskId: string, user: Pick<SessionUser, 'id'>,
 
 export function roleAtLeast(role: string, min: Role): boolean {
   return (ROLE_LEVEL[role as Role] ?? 0) >= ROLE_LEVEL[min]
+}
+
+/**
+ * Validate that every submitted label id belongs to the given workspace.
+ * Rejects cross-workspace (or non-existent) label references server-side and
+ * deduplicates the list so TaskLabel rows stay unique. Returns the validated ids.
+ */
+export async function resolveLabelIds(labelIds: string[], workspaceId: string): Promise<string[]> {
+  const unique = Array.from(new Set(labelIds))
+  if (unique.length === 0) return []
+  const rows = await db.label.findMany({
+    where: { id: { in: unique }, workspaceId },
+    select: { id: true },
+  })
+  if (rows.length !== unique.length) {
+    throw new ApiError(400, 'Satu atau lebih label tidak valid untuk workspace ini.')
+  }
+  return unique
 }

@@ -303,6 +303,7 @@ export function ProjectDetailView({ projectId, tab }: { projectId: string; tab: 
 
       {tab === 'board' ? (
         <BoardView
+          projectId={projectId}
           tasks={data.tasks}
           setTasks={setTasks}
           canEdit={canEdit}
