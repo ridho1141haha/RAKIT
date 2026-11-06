@@ -64,3 +64,27 @@ export async function requireTask(taskId: string, user: Pick<SessionUser, 'id'>,
 export function roleAtLeast(role: string, min: Role): boolean {
   return (ROLE_LEVEL[role as Role] ?? 0) >= ROLE_LEVEL[min]
 }
+
+/**
+ * Verify that every label ID belongs to the given workspace (P1.2 — label
+ * workspace isolation). Throws 400 on the first foreign/unknown label.
+ * Call this BEFORE any task-label write; duplicates in the input are ignored.
+ */
+export async function assertLabelsInWorkspace(
+  workspaceId: string,
+  labelIds: string[],
+): Promise<void> {
+  const unique = [...new Set(labelIds)].filter(Boolean)
+  if (unique.length === 0) return
+  const labels = await db.label.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, workspaceId: true },
+  })
+  const foreign = unique.filter((id) => {
+    const label = labels.find((l) => l.id === id)
+    return !label || label.workspaceId !== workspaceId
+  })
+  if (foreign.length > 0) {
+    throw forbidden('Label tidak valid untuk workspace ini.')
+  }
+}

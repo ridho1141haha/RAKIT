@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { ApiError, parseBody, route } from '@/lib/api-helpers'
 import { requireUser } from '@/lib/auth'
-import { requireProject } from '@/lib/permissions'
+import { requireProject, assertLabelsInWorkspace } from '@/lib/permissions'
 import { logActivity, notify } from '@/lib/activity'
 import type { TaskStatus } from '@/lib/constants'
 
@@ -92,6 +92,11 @@ export const POST = route(async (req: NextRequest, ctx: Ctx) => {
   if (body.milestoneId) {
     const ms = await db.milestone.findUnique({ where: { id: body.milestoneId } })
     if (!ms || ms.projectId !== id) throw new ApiError(400, 'Milestone tidak valid.')
+  }
+  // P1.2: every submitted label must belong to this workspace — reject
+  // foreign/unknown IDs before any write (prevents cross-workspace attachment).
+  if (body.labelIds) {
+    await assertLabelsInWorkspace(project.workspaceId, body.labelIds)
   }
 
   const created = await db.task.create({
