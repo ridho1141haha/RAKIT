@@ -1,6 +1,16 @@
 'use client'
 
 // ─── DocumentsView: two-pane editorial document editor ───────────────────────
+//
+// Autosave design (P1.3 — race-condition rewrite):
+// Every save is bound to ONE document ID and ONE immutable content snapshot
+// captured at edit time. Per-document state lives in maps keyed by docId:
+//   pending  — latest unsaved snapshot (+monotonic revision)
+//   sentRev  — revision currently being persisted (in flight)
+//   failed   — docs whose last save failed (surfaced + retryable)
+// Switching documents, workspaces, or unmounting can never submit one
+// document's content under another document's ID, because a save only ever
+// reads the snapshot stored under ITS OWN docId — never shared editor state.
 
 import * as React from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -16,7 +26,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/hooks/use-toast'
 import { Search, FileText, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+/** Immutable per-document payload snapshot. `rev` is monotonic per document. */
+type DocSnapshot = {
+  title: string
+  content: string
+  projectId: string | null
+  rev: number
+}
+
+const AUTOSAVE_DEBOUNCE_MS = 900
 
 const timeFmt = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' })
 
@@ -48,22 +66,22 @@ export function DocumentsView() {
   const [title, setTitle] = React.useState('')
   const [content, setContent] = React.useState('')
   const [projectId, setProjectId] = React.useState<string | null>(null)
-  const [dirty, setDirty] = React.useState(false)
   const [mode, setMode] = React.useState<'write' | 'preview'>('write')
-  const [saveState, setSaveState] = React.useState<SaveState>('idle')
-  const [savedAt, setSavedAt] = React.useState<Date | null>(null)
+
+  // ── per-document autosave state (refs; saveTick drives status re-renders) ──
+  const pendingRef = React.useRef(new Map<string, DocSnapshot>())
+  const sentRevRef = React.useRef(new Map<string, number>())
+  const failedRef = React.useRef(new Set<string>())
+  const timersRef = React.useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const latestRevRef = React.useRef(new Map<string, number>())
+  /** What the editor was hydrated with for the current selection — edits are detected against it. */
+  const hydratedRef = React.useRef<{ docId: string; title: string; content: string; projectId: string | null } | null>(null)
+  const [saveTick, setSaveTick] = React.useState(0)
+  const [savedAtFor, setSavedAtFor] = React.useState<{ docId: string; at: Date } | null>(null)
+  const selectedIdRef = React.useRef<string | null>(selectedId)
+  selectedIdRef.current = selectedId
 
   const selected = docs?.find((d) => d.id === selectedId) ?? null
-  const dirtyRef = React.useRef(false)
-  dirtyRef.current = dirty
-  const latest = React.useRef({ title: '', content: '', projectId: null as string | null })
-  latest.current = { title, content, projectId }
-  const lastSaved = React.useRef({ title: '', content: '', projectId: null as string | null })
-  const samePayload = (a: { title: string; content: string; projectId: string | null }, b: typeof a) =>
-    a.title === b.title && a.content === b.content && a.projectId === b.projectId
-  const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const inFlight = React.useRef(false)
-  const rerun = React.useRef(false)
 
   // ── fetch list (documents may 404 during parallel build — surface error UI) ──
   const load = React.useCallback(async () => {
@@ -105,71 +123,127 @@ export function DocumentsView() {
     setTitle(selected.title)
     setContent(selected.content)
     setProjectId(selected.projectId)
-    lastSaved.current = { title: selected.title, content: selected.content, projectId: selected.projectId }
-    setDirty(false)
-    dirtyRef.current = false
-    setSaveState('idle')
-    setSavedAt(null)
-  }, [selectedId])
-
-  // ── autosave: debounced 900ms after change, also flush on blur ──────────────
-  const flushSave = React.useCallback(async () => {
-    const doc = selected
-    if (!doc) return
-    const payload = { ...latest.current }
-    if (samePayload(payload, lastSaved.current)) return // nothing new to persist
-    if (inFlight.current) {
-      rerun.current = true
-      return
+    hydratedRef.current = {
+      docId: selected.id,
+      title: selected.title,
+      content: selected.content,
+      projectId: selected.projectId,
     }
-    inFlight.current = true
-    setSaveState('saving')
-    try {
-      await apiPatch(`/api/documents/${doc.id}`, payload)
-      lastSaved.current = payload
-      setSaveState('saved')
-      setSavedAt(new Date())
-      setDirty(false)
-      dirtyRef.current = false
-      // keep the list in sync locally for snappy UI, then let the bump refetch
-      setDocs((prev) =>
-        prev
-          ? prev.map((d) =>
-              d.id === doc.id ? { ...d, title: payload.title, updatedAt: new Date().toISOString() } : d,
-            )
-          : prev,
-      )
-      bump()
-    } catch {
-      // keep editor text intact — user can retry
-      setSaveState('error')
-    } finally {
-      inFlight.current = false
-      if (rerun.current) {
-        rerun.current = false
-        void flushSave()
+  }, [selected?.id])
+
+  // ── the save primitive: persists ONE doc's OWN snapshot ─────────────────────
+  const saveDoc = React.useCallback(
+    async (docId: string) => {
+      const timer = timersRef.current.get(docId)
+      if (timer) {
+        clearTimeout(timer)
+        timersRef.current.delete(docId)
       }
-    }
-  }, [selected, bump])
+      if (sentRevRef.current.has(docId)) return // in flight; the finally-block re-checks pending
+      const snapshot = pendingRef.current.get(docId)
+      if (!snapshot) {
+        failedRef.current.delete(docId)
+        setSaveTick((t) => t + 1)
+        return
+      }
 
+      sentRevRef.current.set(docId, snapshot.rev)
+      setSaveTick((t) => t + 1)
+      try {
+        // The payload comes ONLY from this document's snapshot — never from
+        // shared editor state — so a concurrent document switch cannot
+        // cross-contaminate content.
+        await apiPatch(`/api/documents/${docId}`, {
+          title: snapshot.title,
+          content: snapshot.content,
+          projectId: snapshot.projectId,
+        })
+        // Success: drop the pending snapshot ONLY if no newer edit happened
+        // while this request was in flight (revision guard).
+        const current = pendingRef.current.get(docId)
+        if (current && current.rev === snapshot.rev) pendingRef.current.delete(docId)
+        failedRef.current.delete(docId)
+        if (selectedIdRef.current === docId) setSavedAtFor({ docId, at: new Date() })
+        // keep the list in sync locally for snappy UI, then let the bump refetch
+        setDocs((prev) =>
+          prev
+            ? prev.map((d) =>
+                d.id === docId ? { ...d, title: snapshot.title, updatedAt: new Date().toISOString() } : d,
+              )
+            : prev,
+        )
+        bump()
+      } catch {
+        // Keep the pending snapshot + editor text intact — user can retry.
+        failedRef.current.add(docId)
+      } finally {
+        sentRevRef.current.delete(docId)
+        setSaveTick((t) => t + 1)
+        // Newer edits arrived while saving → persist the newer revision now.
+        if (pendingRef.current.has(docId) && !failedRef.current.has(docId)) {
+          void saveDoc(docId)
+        }
+      }
+    },
+    [bump],
+  )
+  const saveDocRef = React.useRef(saveDoc)
+  saveDocRef.current = saveDoc
+
+  function flushDoc(docId: string) {
+    void saveDocRef.current(docId)
+  }
+
+  /** Persist every document that still has unsaved work (unmount / flush-all). */
+  function flushAll() {
+    for (const docId of [...pendingRef.current.keys()]) flushDoc(docId)
+  }
+
+  // ── edit detection: snapshot the CURRENT doc's editor values per change ─────
   React.useEffect(() => {
-    if (!dirty) return
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => void flushSave(), 900)
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current)
+    const docId = selectedId
+    if (!docId || !canEdit) return
+    const h = hydratedRef.current
+    if (h && h.docId === docId && h.title === title && h.content === content && h.projectId === projectId) {
+      return // hydration render, not an edit
     }
-  }, [dirty, title, content, flushSave])
+    const rev = (latestRevRef.current.get(docId) ?? 0) + 1
+    latestRevRef.current.set(docId, rev)
+    pendingRef.current.set(docId, { title, content, projectId, rev })
+    failedRef.current.delete(docId) // keep typing → autosave retries
+    setSaveTick((t) => t + 1)
+    // debounce per document
+    const existing = timersRef.current.get(docId)
+    if (existing) clearTimeout(existing)
+    timersRef.current.set(
+      docId,
+      setTimeout(() => {
+        timersRef.current.delete(docId)
+        void saveDocRef.current(docId)
+      }, AUTOSAVE_DEBOUNCE_MS),
+    )
+  }, [title, content, projectId, selectedId, canEdit])
+
+  // ── unmount: flush every document with unsaved work (its OWN snapshot) ──────
+  React.useEffect(
+    () => () => {
+      for (const t of timersRef.current.values()) clearTimeout(t)
+      timersRef.current.clear()
+      for (const docId of [...pendingRef.current.keys()]) void saveDocRef.current(docId)
+    },
+    [],
+  )
 
   function edit(fn: () => void) {
     if (!canEdit) return
     fn()
-    setDirty(true)
   }
 
   function selectDoc(id: string) {
     if (id === selectedId) return
-    if (dirtyRef.current) void flushSave() // don't lose unsaved edits
+    // Flush the CURRENT document's own snapshot immediately — never another
+    // document's content (per-document queue makes cross-contamination impossible).
+    if (selectedId) flushDoc(selectedId)
     setSelectedId(id)
   }
 
@@ -200,6 +274,12 @@ export function DocumentsView() {
     setPendingDelete(true)
     try {
       await apiDelete(`/api/documents/${selected.id}`)
+      // drop any queued work for the deleted document
+      pendingRef.current.delete(selected.id)
+      failedRef.current.delete(selected.id)
+      const t = timersRef.current.get(selected.id)
+      if (t) clearTimeout(t)
+      timersRef.current.delete(selected.id)
       const nextId = docs?.find((d) => d.id !== selected.id)?.id ?? null
       setSelectedId(nextId)
       setConfirmOpen(false)
@@ -218,20 +298,24 @@ export function DocumentsView() {
 
   function changeProjectLink(value: string) {
     const next = value === 'none' ? null : value
-    latest.current = { ...latest.current, projectId: next } // keep ref fresh for the immediate save
     setProjectId(next)
-    setDirty(true)
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    void flushSave()
+    if (selectedId && canEdit) {
+      // update this document's snapshot synchronously, then save immediately
+      const rev = (latestRevRef.current.get(selectedId) ?? 0) + 1
+      latestRevRef.current.set(selectedId, rev)
+      pendingRef.current.set(selectedId, { title, content, projectId: next, rev })
+      failedRef.current.delete(selectedId)
+      setSaveTick((t) => t + 1)
+      flushDoc(selectedId)
+    }
   }
 
   // flush unsaved edits when leaving the view
-  const flushRef = React.useRef(flushSave)
-  flushRef.current = flushSave
+  const flushAllRef = React.useRef(flushAll)
+  flushAllRef.current = flushAll
   React.useEffect(
     () => () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      void flushRef.current()
+      flushAllRef.current()
     },
     [],
   )
@@ -248,7 +332,19 @@ export function DocumentsView() {
 
   const projectName = (pid: string | null) => (pid ? projects.find((p) => p.id === pid)?.name ?? null : null)
 
-  // ── render ───────────────────────────────────────────────────────────────────
+  // ── save status for the selected document (derived from per-doc maps) ───────
+  const derivedSaveState: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' = React.useMemo(() => {
+    if (!selectedId) return 'idle'
+    if (failedRef.current.has(selectedId)) return 'error'
+    if (sentRevRef.current.has(selectedId)) return 'saving'
+    if (pendingRef.current.has(selectedId)) return 'unsaved'
+    if (savedAtFor && savedAtFor.docId === selectedId) return 'saved'
+    return 'idle'
+    // saveTick changes whenever any per-doc map mutates
+  }, [selectedId, savedAtFor, saveTick])
+  const selectedSavedAt = savedAtFor && savedAtFor.docId === selectedId ? savedAtFor.at : null
+
+  // ── render ───────────────────────────────────────────────────────────────
   if (error) {
     return (
       <div>
@@ -378,7 +474,7 @@ export function DocumentsView() {
                 <Input
                   value={title}
                   onChange={(e) => edit(() => setTitle(e.target.value))}
-                  onBlur={() => void flushSave()}
+                  onBlur={() => selectedId && flushDoc(selectedId)}
                   readOnly={!canEdit}
                   placeholder="Judul dokumen"
                   aria-label="Judul dokumen"
@@ -412,18 +508,25 @@ export function DocumentsView() {
                   )}
 
                   <div className="ml-auto flex items-center gap-2">
-                    {saveState === 'saving' ? (
+                    {derivedSaveState === 'saving' ? (
                       <span className="font-mono text-[10px] text-muted-foreground">Menyimpan…</span>
-                    ) : saveState === 'saved' && savedAt ? (
+                    ) : derivedSaveState === 'unsaved' ? (
+                      <span className="font-mono text-[10px] text-muted-foreground">Perubahan belum tersimpan…</span>
+                    ) : derivedSaveState === 'saved' && selectedSavedAt ? (
                       <span className="font-mono text-[10px] text-muted-foreground">
-                        Tersimpan {timeFmt.format(savedAt)}
+                        Tersimpan {timeFmt.format(selectedSavedAt)}
                       </span>
-                    ) : saveState === 'error' ? (
+                    ) : derivedSaveState === 'error' ? (
                       <>
                         <span className="font-mono text-[10px] font-semibold text-destructive">
                           Gagal menyimpan — coba lagi
                         </span>
-                        <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => void flushSave()}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => selectedId && flushDoc(selectedId)}
+                        >
                           <RotateCcw className="size-3.5" /> Ulangi
                         </Button>
                       </>
@@ -450,7 +553,7 @@ export function DocumentsView() {
                   <Textarea
                     value={content}
                     onChange={(e) => edit(() => setContent(e.target.value))}
-                    onBlur={() => void flushSave()}
+                    onBlur={() => selectedId && flushDoc(selectedId)}
                     readOnly={!canEdit}
                     placeholder={canEdit ? 'Tulis dalam Markdown — ## Judul, - daftar, **tebal**…' : 'Dokumen ini kosong.'}
                     aria-label="Isi dokumen"

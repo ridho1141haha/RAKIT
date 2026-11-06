@@ -64,15 +64,23 @@ export const PATCH = route(async (req: NextRequest, ctx: Ctx) => {
     },
   })
 
-  await logActivity(db, {
-    workspaceId: existing.workspaceId,
-    projectId: document.projectId,
-    userId: user.id,
-    type: 'DOCUMENT_UPDATED',
-    entityType: 'document',
-    entityId: document.id,
-    entityTitle: document.title,
-  })
+  // Content edits arrive from autosave every few seconds — logging an activity
+  // event for each one would flood the workspace feed. Log only meaningful
+  // metadata changes (title / project link).
+  const metadataChanged =
+    (body.title !== undefined && body.title !== existing.title) ||
+    (body.projectId !== undefined && (body.projectId || null) !== existing.projectId)
+  if (metadataChanged) {
+    await logActivity(db, {
+      workspaceId: existing.workspaceId,
+      projectId: document.projectId,
+      userId: user.id,
+      type: 'DOCUMENT_UPDATED',
+      entityType: 'document',
+      entityId: document.id,
+      entityTitle: document.title,
+    })
+  }
 
   return NextResponse.json({ document })
 })
