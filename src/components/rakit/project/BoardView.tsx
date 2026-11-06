@@ -3,8 +3,10 @@
 /**
  * BoardView — Kanban with 5 status columns and native HTML5 drag & drop.
  * Drop position is computed from pointer Y against card midpoints; the move is
- * applied optimistically, then persisted with PATCH /api/tasks/:id { status, position }.
- * Keyboard fallback: per-card "Pindah ke →" menu (same PATCH contract).
+ * applied optimistically, then persisted as a BATCH via
+ * PATCH /api/projects/:projectId/tasks/reorder — the full post-drop ordering of
+ * every affected column, so all shifted cards keep their positions after
+ * refresh (P1.1). Keyboard fallback: per-card "Pindah ke →" menu (same API).
  */
 
 import * as React from 'react'
@@ -26,12 +28,14 @@ import { ArrowRightLeft, MessageSquare, Plus } from 'lucide-react'
 import { errMessage } from './shared'
 
 export function BoardView({
+  projectId,
   tasks,
   setTasks,
   canEdit,
   onOpenTask,
   onCreate,
 }: {
+  projectId: string
   tasks: Task[]
   setTasks: (updater: (prev: Task[]) => Task[]) => void
   canEdit: boolean
@@ -65,14 +69,25 @@ export function BoardView({
     })
   }
 
-  /** Optimistic move + PATCH { status, position }; failure → toast + refetch revert. */
+  /** Optimistic move + batch reorder persistence; failure → toast + refetch revert. */
   function moveTask(dragId: string, status: TaskStatus, index: number) {
     const task = tasks.find((t) => t.id === dragId)
     if (!task) return
     const curIndex = tasks.filter((t) => t.status === task.status).findIndex((t) => t.id === dragId)
     if (task.status === status && index === curIndex) return // no-op
-    setTasks((prev) => applyMove(prev, dragId, status, index))
-    apiPatch(`/api/tasks/${dragId}`, { status, position: index })
+    const next = applyMove(tasks, dragId, status, index)
+    setTasks(() => next)
+
+    // Persist the FULL post-drop ordering of every affected column (source +
+    // target) so every shifted card keeps its position — not just the dragged
+    // one (P1.1). Array order is the visual order the user sees.
+    const affected = task.status === status ? [status] : [task.status, status]
+    const columns = affected.map((s) => ({
+      status: s,
+      taskIds: next.filter((t) => t.status === s).map((t) => t.id),
+    }))
+    // keepalive: the mutation survives an immediate page refresh
+    apiPatch(`/api/projects/${projectId}/tasks/reorder`, { columns, movedTaskId: dragId }, true)
       .then(() => bump())
       .catch((e: unknown) => {
         toast({ title: 'Gagal memindahkan tugas', description: errMessage(e), variant: 'destructive' })

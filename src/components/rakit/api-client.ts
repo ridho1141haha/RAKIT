@@ -16,6 +16,8 @@ type Options = {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
   signal?: AbortSignal
+  /** Survives page unload — use for mutations that must not be lost on refresh. */
+  keepalive?: boolean
 }
 
 export async function api<T>(path: string, opts: Options = {}): Promise<T> {
@@ -25,6 +27,7 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     signal: opts.signal,
     cache: 'no-store',
+    keepalive: opts.keepalive ?? false,
   })
   let data: unknown = null
   try {
@@ -42,5 +45,6 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
 
 export const apiGet = <T,>(path: string, signal?: AbortSignal) => api<T>(path, { signal })
 export const apiPost = <T,>(path: string, body?: unknown) => api<T>(path, { method: 'POST', body })
-export const apiPatch = <T,>(path: string, body?: unknown) => api<T>(path, { method: 'PATCH', body })
+export const apiPatch = <T,>(path: string, body?: unknown, keepalive = false) =>
+  api<T>(path, { method: 'PATCH', body, keepalive })
 export const apiDelete = <T,>(path: string) => api<T>(path, { method: 'DELETE' })
