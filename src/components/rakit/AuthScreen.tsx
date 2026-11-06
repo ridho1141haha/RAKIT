@@ -11,6 +11,15 @@ import { Loader2, ArrowRight, Lightbulb, KanbanSquare, Users } from 'lucide-reac
 
 type Mode = 'login' | 'register'
 
+/**
+ * Demo login is a LOCAL DEVELOPMENT convenience. It is hidden in production
+ * builds unless explicitly enabled with NEXT_PUBLIC_DEMO_MODE=true. The demo
+ * credentials are public (documented in the README) — they must never be
+ * treated as private accounts on a real deployment.
+ */
+const SHOW_DEMO_LOGIN =
+  process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+
 export function AuthScreen() {
   const signIn = useRakit((s) => s.signIn)
   const [mode, setMode] = React.useState<Mode>('login')
@@ -144,15 +153,17 @@ export function AuthScreen() {
             </Button>
           </form>
 
-          <div className="mt-6 rounded-lg border border-border bg-muted/40 p-3.5">
-            <p className="kicker mb-1.5">Coba tanpa daftar</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Workspace berisi proyek, tugas, dan tim contoh sudah menunggu.
-            </p>
-            <Button variant="outline" size="sm" className="mt-2.5 w-full" onClick={() => void loginDemo()} disabled={pending}>
-              Masuk sebagai Demo
-            </Button>
-          </div>
+          {SHOW_DEMO_LOGIN ? (
+            <div className="mt-6 rounded-lg border border-border bg-muted/40 p-3.5">
+              <p className="kicker mb-1.5">Coba tanpa daftar</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Workspace berisi proyek, tugas, dan tim contoh sudah menunggu.
+              </p>
+              <Button variant="outline" size="sm" className="mt-2.5 w-full" onClick={() => void loginDemo()} disabled={pending}>
+                Masuk sebagai Demo
+              </Button>
+            </div>
+          ) : null}
         </div>
       </main>
     </div>

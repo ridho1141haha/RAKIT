@@ -33,6 +33,8 @@ export function verifyPassword(password: string, stored: string): boolean {
 const sha256 = (v: string) => createHash('sha256').update(v).digest('hex')
 
 export async function createSession(userId: string): Promise<void> {
+  // opportunistic housekeeping — expired sessions never accumulate
+  await db.session.deleteMany({ where: { expiresAt: { lt: new Date() } } })
   const token = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
   await db.session.create({ data: { tokenHash: sha256(token), userId, expiresAt } })
@@ -53,6 +55,21 @@ export async function destroySession(): Promise<void> {
     await db.session.deleteMany({ where: { tokenHash: sha256(token) } })
   }
   store.set(SESSION_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 })
+}
+
+/**
+ * Invalidate every session of a user EXCEPT the caller's current one.
+ * Used after a password change: other devices must re-authenticate, while the
+ * device that performed the change stays signed in.
+ */
+export async function invalidateOtherSessions(userId: string): Promise<number> {
+  const store = await cookies()
+  const token = store.get(SESSION_COOKIE)?.value
+  const currentHash = token ? sha256(token) : null
+  const result = await db.session.deleteMany({
+    where: { userId, ...(currentHash ? { tokenHash: { not: currentHash } } : {}) },
+  })
+  return result.count
 }
 
 export type SessionUser = {
@@ -100,6 +117,9 @@ export function rateLimit(
   limit = 10,
   windowMs = 60_000,
 ): void {
+  // Explicit opt-out for integration tests and load-tested environments.
+  // Never set this in production.
+  if (process.env.RATE_LIMIT_DISABLED === '1') return
   const ip =
     req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     req.headers.get('x-real-ip') ||

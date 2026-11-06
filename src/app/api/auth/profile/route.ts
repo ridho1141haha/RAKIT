@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { ApiError, parseBody, route } from '@/lib/api-helpers'
-import { hashPassword, requireUser, verifyPassword } from '@/lib/auth'
+import { hashPassword, requireUser, verifyPassword, invalidateOtherSessions } from '@/lib/auth'
 import { AVATAR_COLORS } from '@/lib/constants'
 
 const schema = z.object({
@@ -34,6 +34,15 @@ export const PATCH = route(async (req: NextRequest) => {
   }
 
   const updated = await db.user.update({ where: { id: user.id }, data })
+
+  // Password change → other devices' sessions are invalidated (the current
+  // device stays signed in). Session tokens are hashed at rest, so revocation
+  // is the only reliable lever.
+  let revokedSessions: number | undefined
+  if (data.passwordHash) {
+    revokedSessions = await invalidateOtherSessions(user.id)
+  }
+
   return NextResponse.json({
     user: {
       id: updated.id,
@@ -42,5 +51,6 @@ export const PATCH = route(async (req: NextRequest) => {
       avatarColor: updated.avatarColor,
       onboardedAt: updated.onboardedAt,
     },
+    ...(revokedSessions !== undefined ? { revokedSessions } : {}),
   })
 })

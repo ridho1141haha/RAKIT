@@ -2,6 +2,11 @@
  * RAKIT seed — realistic demo data (Indonesian).
  * Run: bun prisma/seed.ts
  * Demo login: demo@rakit.id / demo123
+ *
+ * SAFETY: this script DELETES every row in the database before reseeding.
+ * It is meant for local development with demo data only. It refuses to run
+ * when NODE_ENV=production unless SEED_DEMO=1 is set explicitly — production
+ * databases must never be silently replaced with shared demo accounts.
  */
 import { PrismaClient } from '@prisma/client'
 import { randomBytes, scryptSync } from 'crypto'
@@ -26,6 +31,15 @@ const daysAhead = (n: number, hour = 17) => {
 }
 
 async function main() {
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO !== '1') {
+    console.error(
+      '[seed] Refusing to run: NODE_ENV=production. The seed DELETES all data and\n' +
+        'creates shared demo accounts (demo@rakit.id / demo123 — public credentials).\n' +
+        'If you really intend to seed a production database, run with SEED_DEMO=1.',
+    )
+    process.exit(1)
+  }
+
   // ── clean slate (FK-safe order) ──────────────────────────────────────────
   await db.notification.deleteMany()
   await db.activityEvent.deleteMany()
