@@ -74,7 +74,6 @@ prisma/*.db-journal
 .zscripts/
 agent-ctx/
 download/
-/tests/
 /examples/
 /mini-services/
 Caddyfile

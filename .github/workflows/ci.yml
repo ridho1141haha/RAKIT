@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # CI uses a throwaway SQLite database; never a real one
+      DATABASE_URL: "file:../db/ci.db"
+      RATE_LIMIT_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prisma schema validation
+        run: bunx prisma validate
+
+      - name: Prisma client generation
+        run: bunx prisma generate
+
+      - name: TypeScript typecheck (app + tests)
+        run: bun run typecheck
+
+      - name: ESLint
+        run: bun run lint
+
+      - name: API + unit tests (throwaway database, isolated server)
+        run: bun run test
+
+      - name: Production build
+        run: bun run build
